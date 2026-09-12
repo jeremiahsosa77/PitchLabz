@@ -1,0 +1,27 @@
+{
+  "name": "@pitch/api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "build": "tsup src/index.ts --format esm --out-dir dist --clean",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pitch/contracts": "workspace:*",
+    "@pitch/validation": "workspace:*",
+    "@pitch/config": "workspace:*",
+    "hono": "^4.13.7",
+    "@hono/node-server": "^1.19.0",
+    "@supabase/supabase-js": "^2.99.0",
+    "stripe": "^22.6.2",
+    "resend": "^6.9.0",
+    "@sentry/node": "^10.40.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0"
+  }
+}

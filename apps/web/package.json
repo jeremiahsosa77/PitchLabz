@@ -1,0 +1,33 @@
+{
+  "name": "@pitch/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pitch/contracts": "workspace:*",
+    "@pitch/validation": "workspace:*",
+    "@pitch/config": "workspace:*",
+    "@pitch/ui": "workspace:*",
+    "next": "16.3.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "@supabase/supabase-js": "^2.99.0",
+    "react-hook-form": "^7.71.0",
+    "@hookform/resolvers": "^3.10.0",
+    "zod": "^3.25.76",
+    "lucide-react": "^0.577.0",
+    "@sentry/nextjs": "^10.40.0",
+    "posthog-js": "^1.360.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tailwindcss": "^4.2.0",
+    "@tailwindcss/postcss": "^4.2.0"
+  }
+}
