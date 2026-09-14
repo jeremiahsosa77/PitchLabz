@@ -1,3 +1,5 @@
+import { validateWebEnv } from "./env-validation";
+validateWebEnv(process.env);
 import type { NextConfig } from "next";
 const config: NextConfig = {
   transpilePackages: [

@@ -11,6 +11,7 @@ type PaymentOrder = {
   status: string;
   checkout_expires_at: string;
   stripe_checkout_session_id: string | null;
+  stripe_price_id: string | null;
 };
 export function payments(
   env: Env,
@@ -74,12 +75,13 @@ export function payments(
           .eq("id", o.product_id)
           .single(),
       );
+      if (!o.stripe_price_id) throw new AppError("PRODUCT_UNAVAILABLE", 409);
       const metadata = { order_id: o.id };
       const session = await s.checkout.sessions.create(
         {
           customer: await customer(uid),
           mode: p.product_type === "premium" ? "subscription" : "payment",
-          line_items: [{ price: p.stripe_price_id, quantity: 1 }],
+          line_items: [{ price: o.stripe_price_id, quantity: 1 }],
           metadata,
           ...(p.product_type === "premium"
             ? { subscription_data: { metadata } }
@@ -105,6 +107,35 @@ export function payments(
           .eq("id", o.id),
       );
       return { url: session.url };
+    },
+    async reconcileOrder(orderId: string) {
+      const order = await query<PaymentOrder>(
+        db.from("orders").select("*").eq("id", orderId).single(),
+      );
+      if (order.status !== "pending") return { status: order.status };
+      if (!order.stripe_checkout_session_id)
+        return {
+          status: "manual_review",
+          reason:
+            "No saved Checkout ID. Locate Stripe payment/session before releasing the hold.",
+        };
+      const session = await required().checkout.sessions.retrieve(
+        order.stripe_checkout_session_id,
+      );
+      if (session.metadata?.order_id !== order.id)
+        throw new AppError("PAYMENT_MISMATCH", 409);
+      if (session.status !== "expired")
+        return {
+          status: session.status,
+          reason:
+            "Open holds stay reserved. For completed payments, resend the original Stripe event.",
+        };
+      await rpc(db, "process_stripe_event", {
+        eid: "reconcile:" + session.id + ":expired",
+        etype: "checkout.session.expired",
+        p: { order_id: order.id },
+      });
+      return { status: "cancelled" };
     },
     async portal(uid: string) {
       const s = required();
@@ -193,6 +224,8 @@ export function payments(
           "Invalid webhook signature.",
         );
       }
+      if (event.livemode && !env.STRIPE_SECRET_KEY?.startsWith("sk_live_"))
+        throw new AppError("PAYMENT_MODE_MISMATCH", 400);
       const p: Record<string, unknown> = { event_created: event.created };
       let sid: string | null = null;
       const ref = (v: string | { id: string } | null | undefined) =>
@@ -251,6 +284,7 @@ export function payments(
               !l.parent.subscription_item_details.proration,
           );
           if (line) {
+            p.invoice_price_id = ref(line.pricing?.price_details?.price);
             p.period_start = new Date(line.period.start * 1000).toISOString();
             p.period_end = new Date(line.period.end * 1000).toISOString();
           }
@@ -260,6 +294,8 @@ export function payments(
           const charge = event.data.object;
           p.payment_intent = ref(charge.payment_intent);
           p.refund_amount = charge.amount_refunded;
+          p.full_refund =
+            charge.refunded && charge.amount_refunded === charge.amount;
           p.charge_id = charge.id;
           if (charge.metadata.order_id) p.order_id = charge.metadata.order_id;
           break;
@@ -274,6 +310,13 @@ export function payments(
         p.order_id = sub.metadata.order_id;
         p.subscription_id = sub.id;
         p.subscription_status = sub.status;
+        p.subscription_price_id = item.price.id;
+        p.subscription_period_start = new Date(
+          item.current_period_start * 1000,
+        ).toISOString();
+        p.subscription_period_end = new Date(
+          item.current_period_end * 1000,
+        ).toISOString();
         p.period_start ??= new Date(
           item.current_period_start * 1000,
         ).toISOString();

@@ -32,12 +32,19 @@ export function readEnv(raw: NodeJS.ProcessEnv): Env {
     ] as const) {
       if (!env[key]) throw new Error(`Missing ${key}`);
     }
-    if (
-      !env.APP_URL.startsWith("https://") ||
-      !env.CORS_ORIGIN.startsWith("https://")
-    )
-      throw new Error("Production requires HTTPS");
-  } else if (env.STRIPE_SECRET_KEY?.startsWith("sk_live_"))
+    for (const value of [env.APP_URL, env.CORS_ORIGIN, env.SUPABASE_URL!]) {
+      const url = new URL(value);
+      if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        url.pathname !== "/" ||
+        url.search ||
+        url.hash
+      )
+        throw new Error("Production URLs must be HTTPS origins");
+    }
+  } else if (/^(sk|rk)_live_/.test(env.STRIPE_SECRET_KEY || ""))
     throw new Error("Live Stripe keys are prohibited outside production");
   return env;
 }

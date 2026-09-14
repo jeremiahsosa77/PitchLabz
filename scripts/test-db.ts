@@ -1,3 +1,4 @@
+import { hardeningChecks } from "./db-hardening-checks";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
@@ -281,12 +282,19 @@ try {
       0,
     );
   });
+  await db.exec(
+    "update coaching_products set stripe_price_id='price_premium' where product_type='premium'",
+  );
   const po = await scalar<string>(
     `insert into orders(customer_id,athlete_id,product_id,request_id,total_cents) values('${parent}','${a}','10000000-0000-4000-8000-000000000003',gen_random_uuid(),15000) returning id`,
   );
   const invoice = {
     order_id: po,
     subscription_id: "sub_test",
+    subscription_price_id: "price_premium",
+    invoice_price_id: "price_premium",
+    amount: 15000,
+    currency: "usd",
     subscription_status: "active",
     period_start: "2026-09-10T00:00:00Z",
     period_end: "2026-10-10T00:00:00Z",
@@ -354,7 +362,12 @@ try {
     await db.query("select process_stripe_event($1,$2,$3::jsonb)", [
       "evt_refund",
       "charge.refunded",
-      JSON.stringify({ payment_intent: "pi_test" }),
+      JSON.stringify({
+        payment_intent: "pi_test",
+        charge_id: "ch_test",
+        refund_amount: 4000,
+        full_refund: true,
+      }),
     ]);
     assert.equal(
       await scalar<number>(
@@ -403,6 +416,7 @@ try {
       1,
     );
   });
+  checks += await hardeningChecks(db);
   console.info(
     `Database: ${checks} checks passed against PostgreSQL WASM with actual migrations, roles, RLS, and transactions.`,
   );

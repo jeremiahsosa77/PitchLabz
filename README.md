@@ -22,18 +22,18 @@ Private accounts and mutations fail closed until Supabase is configured. Preview
 
 ## Structure
 
-| Directory | Responsibility |
-| --- | --- |
-| `apps/web` | Next.js, React, Tailwind, React Hook Form; public pages and private workspace UI |
-| `apps/api` | Hono API, verified authentication, Stripe, notifications, validated commands |
-| `packages/contracts` | Shared response and domain types |
-| `packages/validation` | Shared Zod request schemas |
-| `packages/ui` | Repeated interface primitives |
-| `packages/config` | Development catalog and documented launch defaults |
-| `supabase/migrations` | Schema, RLS, transactional workflows and constraints |
-| `supabase/seed.sql` | Local-only fictional users and coaching records |
-| `tests`, `scripts/test-db.ts` | Unit, API, Stripe signature, database and browser coverage |
-| `docs` | Architecture, API, environment, testing, deployment and launch instructions |
+| Directory                     | Responsibility                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| `apps/web`                    | Next.js, React, Tailwind, React Hook Form; public pages and private workspace UI |
+| `apps/api`                    | Hono API, verified authentication, Stripe, notifications, validated commands     |
+| `packages/contracts`          | Shared response and domain types                                                 |
+| `packages/validation`         | Shared Zod request schemas                                                       |
+| `packages/ui`                 | Repeated interface primitives                                                    |
+| `packages/config`             | Development catalog and documented launch defaults                               |
+| `supabase/migrations`         | Schema, RLS, transactional workflows and constraints                             |
+| `supabase/seed.sql`           | Local-only fictional users and coaching records                                  |
+| `tests`, `scripts/test-db.ts` | Unit, API, Stripe signature, database and browser coverage                       |
+| `docs`                        | Architecture, API, environment, testing, deployment and launch instructions      |
 
 ## Connect local services
 
@@ -63,10 +63,12 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm test:db
-pnpm build
+PITCH_PREVIEW_BUILD=1 pnpm build
 pnpm exec playwright install chromium
-pnpm test:e2e
+PITCH_PREVIEW_BUILD=1 pnpm test:e2e
 ```
+
+PowerShell: set `$env:PITCH_PREVIEW_BUILD="1"` before the review build/browser commands. Do not set it on connected staging/production deployments. See [staging validation](docs/STAGING.md) and [payment operations](docs/PAYMENT_OPERATIONS.md).
 
 `test:db` runs the real migrations and SQL commands inside PostgreSQL WASM with actual roles, RLS, pgcrypto and exclusion constraints. It does not replace staging validation of Supabase Auth, PostgREST, or multi-connection concurrency. The explicitly gated live browser tests require a configured isolated test environment; ordinary browser tests require no service secrets.
 

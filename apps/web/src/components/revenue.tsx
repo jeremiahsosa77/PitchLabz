@@ -23,8 +23,21 @@ export function RevenuePanel({ demo }: { demo: boolean }) {
         }
       : null,
   );
+  const [reviews, setReviews] = useState<
+    {
+      id: string;
+      order_id: string | null;
+      reason: string;
+      charge_id: string | null;
+      amount_cents: number | null;
+    }[]
+  >([]);
   const [error, setError] = useState("");
   useEffect(() => {
+    if (!demo)
+      void api<{ data: typeof reviews }>("/coach/payment-reviews")
+        .then((r) => setReviews(r.data))
+        .catch((e) => setError(e.message));
     if (!demo)
       void api<{ data: Revenue }>("/coach/revenue")
         .then((r) => setData(r.data))
@@ -40,6 +53,29 @@ export function RevenuePanel({ demo }: { demo: boolean }) {
         <p className="error" role="alert">
           {error}
         </p>
+      )}
+      {reviews.length > 0 && (
+        <section aria-label="Payment reviews">
+          <h3>Refunds requiring review ({reviews.length})</h3>
+          <p>
+            Partial refunds preserve entitlements. Review the charge and athlete
+            history before making a manual adjustment.
+          </p>
+          {reviews.map((r) => (
+            <article key={r.id} className="report">
+              <strong>{r.reason.replaceAll("_", " ")}</strong>
+              <p>
+                Order: {r.order_id || "Unmatched"} ? Charge:{" "}
+                {r.charge_id || "Unknown"}
+              </p>
+              <p>
+                {r.amount_cents === null
+                  ? "Review Stripe amount"
+                  : dollars(r.amount_cents)}
+              </p>
+            </article>
+          ))}
+        </section>
       )}
       {data ? (
         <div className="metric-grid">

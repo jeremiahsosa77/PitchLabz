@@ -146,12 +146,14 @@ export function DataForm({
 }
 export function SlotPicker({
   athlete_id,
+  athleteName,
   reschedule,
   close,
   saved,
   demo = false,
 }: {
   athlete_id: string;
+  athleteName: string;
   reschedule?: string;
   close: () => void;
   saved: () => void;
@@ -192,7 +194,7 @@ export function SlotPicker({
   }
   async function book() {
     const slot = slots.find((s) => s.starts_at === selected);
-    if (!slot) return;
+    if (!slot || !searched || loading) return;
     setLoading(true);
     try {
       const result = await api<{ url?: string }>(
@@ -203,7 +205,7 @@ export function SlotPicker({
               athlete_id,
               coach_id: slot.coach_id,
               starts_at: slot.starts_at,
-              delivery_mode: mode,
+              delivery_mode: slot.delivery_mode,
               kind,
             },
       );
@@ -223,6 +225,7 @@ export function SlotPicker({
       title={reschedule ? "Reschedule lesson" : "Book a lesson"}
       close={close}
     >
+      <p className="notice">Booking for {athleteName}</p>
       <p>
         Select an available time. Times are displayed in Central Time. A credit
         must remain valid through the selected lesson.
@@ -235,6 +238,8 @@ export function SlotPicker({
           onChange={(e) => {
             setDate(e.target.value);
             setSearched(false);
+            setSelected("");
+            setSlots([]);
           }}
         />
       </label>
@@ -245,6 +250,8 @@ export function SlotPicker({
           onChange={(e) => {
             setMode(e.target.value);
             setSearched(false);
+            setSelected("");
+            setSlots([]);
           }}
         >
           <option value="in_person">In person</option>

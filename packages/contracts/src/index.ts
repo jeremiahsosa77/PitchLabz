@@ -35,6 +35,7 @@ export interface Product {
   display_order: number;
   capacity: number | null;
   full?: boolean;
+  capacity_remaining?: number;
 }
 export interface Credit {
   id: string;
@@ -143,6 +144,7 @@ export interface Settings {
 }
 export interface HubData {
   profile: Profile;
+  coaching_status?: { athlete_id: string; premium_active: boolean }[];
   athletes: Athlete[];
   bookings: Booking[];
   credits: Credit[];

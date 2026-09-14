@@ -14,7 +14,8 @@ export async function loadProducts(): Promise<Product[]> {
   } catch {
     /* A catalog preview is permitted only outside configured production. */
   }
-  return process.env.NODE_ENV === "production" && process.env.API_URL
+  return process.env.NODE_ENV === "production" &&
+    process.env.PITCH_PREVIEW_BUILD !== "1"
     ? []
     : catalog;
 }

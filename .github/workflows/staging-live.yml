@@ -1,0 +1,47 @@
+name: Isolated staging validation
+on:
+  workflow_dispatch:
+    inputs:
+      stripe:
+        description: Run hosted Stripe TEST payments and refunds
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: staging-live
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      E2E_LIVE: "1"
+      E2E_TARGET: staging
+      E2E_STRIPE: ${{ inputs.stripe && '1' || '0' }}
+      E2E_STRIPE_SECRET_KEY: ${{ secrets.E2E_STRIPE_SECRET_KEY }}
+      E2E_STRIPE_WEBHOOK_SECRET: ${{ secrets.E2E_STRIPE_WEBHOOK_SECRET }}
+      E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+      E2E_API_URL: ${{ vars.E2E_API_URL }}
+      E2E_SUPABASE_URL: ${{ vars.E2E_SUPABASE_URL }}
+      E2E_SUPABASE_PROJECT_REF: ${{ vars.E2E_SUPABASE_PROJECT_REF }}
+      E2E_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.E2E_SUPABASE_PUBLISHABLE_KEY }}
+      E2E_SUPABASE_SECRET_KEY: ${{ secrets.E2E_SUPABASE_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsx -e "import {stagingEnv} from './scripts/staging-env'; stagingEnv()"
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright test tests/e2e/live.spec.ts --project=desktop
+      - if: inputs.stripe
+        run: pnpm exec playwright test tests/e2e/stripe-live.spec.ts --project=desktop
+      # Live traces/artifacts are deliberately not uploaded: Auth tokens are private.

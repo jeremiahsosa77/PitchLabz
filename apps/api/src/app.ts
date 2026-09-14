@@ -7,7 +7,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Profile, Product } from "@pitch/contracts";
 import * as v from "@pitch/validation";
-import { catalog, defaults } from "@pitch/config";
+import { catalog } from "@pitch/config";
 import { AppError, dbClients, query, rpc } from "./db";
 import type { Env } from "./env";
 import { payments } from "./payments";
@@ -87,6 +87,18 @@ export function createApp(env: Env, clients = dbClients(env)) {
     ),
   );
   app.get("/health", (c) => c.json({ status: "ok", configured: !!clients }));
+  async function attachCapacity(products: Product[]) {
+    const rows = await rpc<
+      { product_id: string; capacity: number; occupied: number }[]
+    >(clients!.admin, "premium_capacity_status");
+    for (const p of products) {
+      const row = rows.find((r) => r.product_id === p.id);
+      if (row) {
+        p.full = row.occupied >= row.capacity;
+        p.capacity_remaining = Math.max(0, row.capacity - row.occupied);
+      }
+    }
+  }
   app.get("/api/v1/products", async (c) => {
     if (!clients)
       return c.json({
@@ -102,20 +114,7 @@ export function createApp(env: Env, clients = dbClients(env)) {
         .eq("active", true)
         .order("display_order"),
     );
-    const cfg = await query<{ value: typeof defaults }>(
-      clients.admin.from("business_settings").select("value").single(),
-    );
-    for (const p of products) {
-      if (p.product_type === "premium") {
-        const { count, error } = await clients.admin
-          .from("subscriptions")
-          .select("id", { head: true, count: "exact" })
-          .eq("product_id", p.id)
-          .not("status", "in", "(canceled,incomplete_expired)");
-        if (error) throw new AppError("NOT_CONFIGURED", 503);
-        p.full = (count || 0) >= (p.capacity ?? cfg.value.premium_capacity);
-      }
-    }
+    await attachCapacity(products);
     return c.json({ data: products });
   });
   app.post("/api/v1/webhooks/stripe", async (c) => {
@@ -264,13 +263,18 @@ export function createApp(env: Env, clients = dbClients(env)) {
       read("subscriptions"),
       read("orders"),
       read("coach_notes"),
-      read("coaching_products"),
+      query<Product[]>(db.from("coaching_products").select("*").limit(500)),
       query<{ value: unknown }>(
         db.from("business_settings").select("value").single(),
       ),
     ]);
+    await attachCapacity(products);
+    const coaching_status = await rpc(clients!.admin, "coaching_status", {
+      u: actor(c),
+    });
     return c.json({
       data: {
+        coaching_status,
         profile: c.get("profile"),
         athletes,
         bookings,
@@ -369,15 +373,13 @@ export function createApp(env: Env, clients = dbClients(env)) {
       throw new AppError("ATHLETE_LOGIN_NOT_ALLOWED", 409);
     const token = randomBytes(32).toString("hex");
     await query(
-      clients!.admin
-        .from("athlete_access")
-        .insert({
-          athlete_id: id,
-          invited_email: email,
-          invited_by: actor(c),
-          token_hash: createHash("sha256").update(token).digest("hex"),
-          expires_at: new Date(Date.now() + 86400000 * 7).toISOString(),
-        }),
+      clients!.admin.from("athlete_access").insert({
+        athlete_id: id,
+        invited_email: email,
+        invited_by: actor(c),
+        token_hash: createHash("sha256").update(token).digest("hex"),
+        expires_at: new Date(Date.now() + 86400000 * 7).toISOString(),
+      }),
     );
     return c.json({
       url: `${env.APP_URL}/signup?invite=${token}`,
@@ -492,6 +494,24 @@ export function createApp(env: Env, clients = dbClients(env)) {
     staff(c);
     await next();
   });
+  app.post("/api/v1/coach/orders/:id/reconcile", async (c) => {
+    staff(c, true);
+    return c.json(await pay!.reconcileOrder(v.id.parse(c.req.param("id"))));
+  });
+  app.get("/api/v1/coach/payment-reviews", async (c) => {
+    staff(c, true);
+    return c.json({
+      data: await query(
+        c
+          .get("db")
+          .from("payment_reviews")
+          .select("*")
+          .is("resolved_at", null)
+          .order("created_at")
+          .limit(100),
+      ),
+    });
+  });
   app.get("/api/v1/coach/revenue", async (c) => {
     staff(c, true);
     return c.json({
@@ -600,6 +620,16 @@ export function createApp(env: Env, clients = dbClients(env)) {
       }),
     }),
   );
+  app.patch("/api/v1/coach/progress-reports/:id", async (c) =>
+    c.json({
+      data: await rpc(clients!.admin, "save_coaching", {
+        u: actor(c),
+        kind: "report",
+        rid: v.id.parse(c.req.param("id")),
+        p: v.reportSchema.parse(await c.req.json()),
+      }),
+    }),
+  );
   app.post("/api/v1/coach/video-submissions/:id/feedback", async (c) =>
     c.json({
       data: await rpc(clients!.admin, "save_coaching", {
@@ -616,31 +646,10 @@ export function createApp(env: Env, clients = dbClients(env)) {
       .object({ status: z.enum(["received", "in_review", "closed"]) })
       .strict()
       .parse(await c.req.json());
-    const allowed =
-      status === "received"
-        ? ["awaiting_video"]
-        : status === "in_review"
-          ? ["received"]
-          : ["awaiting_video", "received", "in_review", "completed"];
-    const result = await query(
-      clients!.admin
-        .from("video_submissions")
-        .update({
-          status,
-          ...(status === "received"
-            ? { received_at: new Date().toISOString() }
-            : {}),
-        })
-        .eq("id", id)
-        .in("status", allowed)
-        .select()
-        .single(),
-    );
-    await rpc(clients!.admin, "audit", {
+    const result = await rpc(clients!.admin, "set_video_status", {
       u: actor(c),
-      action: `video_${status}`,
-      resource: "video_submissions",
-      rid: id,
+      vid: id,
+      new_status: status,
     });
     return c.json({ data: result });
   });

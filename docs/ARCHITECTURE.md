@@ -12,7 +12,7 @@ The application uses Supabase’s documented [`getUser`](https://supabase.com/do
 
 Profiles have parent, athlete, coach, or admin roles. An athlete has one parent owner and at most one athlete login. Independent athletes must be at least 18. Guardian-created invitations link verified email accounts aged 13+; invitation tokens are stored only as SHA-256 hashes and expire after seven days. Under-13 athletes have parent-managed records only. Adult birth dates are self-declared; final consent and identity procedures require business/legal review.
 
-Parents read their own athletes; athletes read only their linked record. Minor accounts cannot control checkout, billing, booking mutations, or parent subscription records. Coaches read coaching data, while financial/settings administration requires admin. Jacob’s initial role is admin, which also permits coaching functions. Private coach notes and draft plans/reports/feedback remain hidden from customers.
+Parents read their own athletes; athletes read only their linked record. Minor accounts cannot control checkout, billing, booking mutations, or parent subscription records. A restricted server projection returns athlete IDs and current Premium-access booleans to authorized coaches/linked athletes without returning parent billing data. Direct minor family/billing UI routes are blocked as well as hidden from navigation. Coaches read coaching data, while financial/settings administration requires admin. Jacob’s initial role is admin, which also permits coaching functions. Private coach notes and draft plans/reports/feedback remain hidden from customers.
 
 ## Payments and entitlements
 
@@ -20,9 +20,9 @@ An order reserves a program for an authorized athlete. The API resolves the Stri
 
 One-time purchases issue credits once per order. Premium issues four configured training credits once per paid billing-cycle invoice, never for prorations or the checkout redirect. Credit batch uniqueness protects against different webhook events representing the same purchase. Credits expire at the invoice’s paid period end plus one calendar month, using PostgreSQL calendar intervals. Failed payments start a configurable grace period; historical records remain intact. Canceled subscriptions retain ordinary unexpired credits.
 
-Stripe subscription state is retrieved when handling subscription/invoice events. Event ordering prevents older snapshots overwriting newer state. Premium capacity counts subscriptions plus pending order holds under a product row lock. Holds are released by verified Checkout expiration events, not local time, so delayed webhooks cannot cause overselling. A server failure before the Checkout session is saved can leave a conservative hold requiring Stripe reconciliation; do not manually clear a hold without checking whether payment exists.
+Stripe subscription state is retrieved when handling subscription/invoice events. Event ordering prevents older snapshots overwriting newer state. Invoice credit periods are separate from the current subscription periods retrieved from Stripe, preventing late invoices from moving membership dates backwards. Orders snapshot their Stripe price; Premium cycle invoices must match that price, USD and the original amount. Premium capacity counts subscriptions plus pending order holds under a product row lock. Holds are released by verified Checkout expiration events, not local time, so delayed webhooks cannot cause overselling. Admin reconciliation retrieves Stripe state and only releases verified expired sessions. A pending order and its synchronized subscription are counted once. A server failure before the Checkout session is saved can leave a conservative hold requiring Stripe reconciliation; do not manually clear a hold without checking whether payment exists.
 
-Refunds conservatively revoke unused credits from the associated order. Existing booked sessions and partial/subscription refunds require operator review; see launch checklist. Stripe is authoritative for payment amounts and transaction status. The local ledger supports a lightweight net-revenue view, not accounting. MRR is clearly labeled an estimate at current catalog pricing.
+Full one-time refunds revoke unused credits from the associated order. Partial refunds preserve entitlement and create administrator-only payment review records; subscription, unmatched and already-booked refunds also require operator review. Cumulative refund amounts update one ledger row per charge. See PAYMENT_OPERATIONS.md for the exact manual procedure. Stripe is authoritative for payment amounts and transaction status. The local ledger supports a lightweight net-revenue view, not accounting. MRR is clearly labeled an estimate at current catalog pricing.
 
 Reference: [Stripe subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks).
 
@@ -36,7 +36,7 @@ Reschedule/cancel commands record the original booking version and server-comput
 
 ## Coaching and video
 
-Plans and their days are saved transactionally. Reports and video feedback support draft/published status. Publication queues a notification in the same transaction. Plans/reports use browser print styles instead of a PDF service.
+Plans and their days are saved transactionally. Reports and video feedback support draft/published status. Publication queues a notification in the same transaction. Video receipt now commits state, audit and a deduplicated receipt notification together. Plans/reports use browser print styles instead of a PDF service.
 
 Video submissions consume an analysis credit or verify current Premium access. Only metadata, status, context and written feedback are stored. A readable reference connects the request to a video sent directly through the customer’s email/text app. No upload input, storage bucket, file proxy, media processor or video thumbnail exists.
 
@@ -49,3 +49,5 @@ PostHog accepts only an allowlisted event name, no arbitrary properties, with au
 ## Intentional V1 limits
 
 One guardian owner, no hosted video, no in-app SMS/chat, no calendar-provider integration, no AI analysis, no custom payment UI, no server PDF generation, no automatic retention promotions. Retention enablement is stored for future work; no discount is applied automatically. Read lists are bounded at 500 rows and need pagination before the business grows beyond that operational scale.
+
+Incremental UI modules live under `apps/web/src/features/{athletes,bookings,videos,plans,reports,coach}`. The Hub retains orchestration; booking dialogs name the athlete, changing selection clears open actions, and changing booking filters clears prior slots. API refresh failures clear stale workspace data. Coach priorities use Chicago business dates. Production web configuration is validated before build/start; review-only builds require explicit `PITCH_PREVIEW_BUILD=1`.

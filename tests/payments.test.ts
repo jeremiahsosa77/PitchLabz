@@ -73,6 +73,7 @@ it("checkout resolves database price and stable Stripe idempotency key", async (
     athlete_id: "athlete",
     product_id: "product",
     total_cents: 4000,
+    stripe_price_id: "price_trusted",
     checkout_expires_at: new Date(Date.now() + 1900000).toISOString(),
     stripe_checkout_session_id: null,
   };
@@ -123,3 +124,116 @@ it("checkout resolves database price and stable Stripe idempotency key", async (
   );
   create.mockRestore();
 });
+it.each([false, true])(
+  "refund normalization forwards full_refund=%s",
+  async (full) => {
+    const { db, rpc } = database();
+    const event = signedEvent("charge.refunded", {
+      id: "ch_test",
+      payment_intent: "pi_test",
+      amount: 4000,
+      amount_refunded: full ? 4000 : 1000,
+      refunded: full,
+      metadata: {},
+    });
+    await payments(env, db, stripe).webhook(event.payload, event.signature);
+    expect(rpc).toHaveBeenCalledWith(
+      "process_stripe_event",
+      expect.objectContaining({
+        p: expect.objectContaining({
+          full_refund: full,
+          refund_amount: full ? 4000 : 1000,
+        }),
+      }),
+    );
+  },
+);
+it("invoice credits use invoice dates while subscription keeps latest retrieved dates", async () => {
+  const { db, rpc } = database();
+  const retrieve = vi
+    .spyOn(stripe.subscriptions, "retrieve")
+    .mockResolvedValue({
+      id: "sub_test",
+      metadata: { order_id: "order" },
+      status: "active",
+      cancel_at_period_end: false,
+      items: {
+        data: [
+          {
+            price: { id: "price_test" },
+            current_period_start: 2000000000,
+            current_period_end: 2002600000,
+          },
+        ],
+      },
+    } as unknown as Stripe.Response<Stripe.Subscription>);
+  try {
+    const event = signedEvent("invoice.paid", {
+      id: "in_test",
+      parent: { subscription_details: { subscription: "sub_test" } },
+      amount_paid: 15000,
+      currency: "usd",
+      billing_reason: "subscription_cycle",
+      lines: {
+        data: [
+          {
+            parent: { subscription_item_details: { proration: false } },
+            pricing: { price_details: { price: "price_test" } },
+            period: { start: 1900000000, end: 1902600000 },
+          },
+        ],
+      },
+    });
+    await payments(env, db, stripe).webhook(event.payload, event.signature);
+    expect(rpc).toHaveBeenCalledWith(
+      "process_stripe_event",
+      expect.objectContaining({
+        p: expect.objectContaining({
+          invoice_price_id: "price_test",
+          subscription_price_id: "price_test",
+          period_end: new Date(1902600000 * 1000).toISOString(),
+          subscription_period_end: new Date(2002600000 * 1000).toISOString(),
+        }),
+      }),
+    );
+  } finally {
+    retrieve.mockRestore();
+  }
+});
+it.each(["open", "complete", "expired"])(
+  "reconciliation handles %s checkout conservatively",
+  async (status) => {
+    const rpc = vi.fn().mockResolvedValue({ data: "processed", error: null });
+    const row = {
+      id: "order_test",
+      status: "pending",
+      stripe_checkout_session_id: "cs_test",
+    };
+    const from = () => {
+      const b = {
+        select: () => b,
+        eq: () => b,
+        single: async () => ({ data: row, error: null }),
+      };
+      return b;
+    };
+    const retrieve = vi
+      .spyOn(stripe.checkout.sessions, "retrieve")
+      .mockResolvedValue({
+        id: "cs_test",
+        status,
+        metadata: { order_id: row.id },
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
+    try {
+      const result = await payments(
+        env,
+        { rpc, from } as unknown as SupabaseClient,
+        stripe,
+      ).reconcileOrder(row.id);
+      expect(result.status).toBe(status === "expired" ? "cancelled" : status);
+      expect(rpc).toHaveBeenCalledTimes(status === "expired" ? 1 : 0);
+    } finally {
+      retrieve.mockRestore();
+    }
+  },
+);

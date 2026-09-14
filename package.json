@@ -5,11 +5,12 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "typecheck": "turbo typecheck",
+    "typecheck": "turbo typecheck && tsc --project tsconfig.tests.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:db": "tsx scripts/test-db.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "setup:staging": "tsx scripts/setup-staging.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.14",

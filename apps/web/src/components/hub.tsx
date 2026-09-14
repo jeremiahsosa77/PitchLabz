@@ -1,4 +1,5 @@
 "use client";
+import { CoachPriorities } from "../features/coach/CoachPriorities";
 import { RevenuePanel } from "./revenue";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -21,30 +22,22 @@ import {
   Target,
 } from "lucide-react";
 import { Button, Panel, Empty, Badge } from "@pitch/ui";
-import type { Athlete, HubData, Plan, Product, Video } from "@pitch/contracts";
+import type {
+  Athlete,
+  HubData,
+  Plan,
+  Product,
+  Report,
+  Video,
+} from "@pitch/contracts";
 import { api, ApiFailure, auth, dollars, formatTime } from "../lib/api";
 import { demoData } from "../lib/demo";
 import { Brand } from "./brand";
 import { DataForm, Modal, SlotPicker, type Field } from "./forms";
-import {text,opts,type Editor} from "./hub-types";
-import {renderHubPanels} from "./hub-panels";
-import {Availability} from "./availability";
-const athleteFields: Field[] = [
-  text("first_name", "First name"),
-  text("last_name", "Last name"),
-  text("date_of_birth", "Birth date", "date"),
-  text("school", "School (optional)", "text", false),
-  text("graduation_year", "Graduation year (optional)", "number", false),
-  opts("competitive_level", "Level", [
-    "youth",
-    "middle_school",
-    "high_school",
-    "college",
-    "adult",
-  ]),
-  opts("throws", "Throwing arm", ["R", "L", "S"]),
-  text("goals", "Development goals", "textarea", false),
-];
+import { text, opts, type Editor } from "./hub-types";
+import { renderHubPanels } from "./hub-panels";
+import { Availability } from "./availability";
+import { athleteFields } from "../features/athletes/athlete-fields";
 export function Hub({
   coach = false,
   demo = false,
@@ -102,6 +95,7 @@ export function Hub({
           router.replace("/login");
           return;
         }
+        setData(null);
         setError(e.message);
       });
     return () => {
@@ -109,7 +103,8 @@ export function Hub({
     };
   }, [coach, demo, revision, router]);
   useEffect(() => {
-    if (data && !selected) setSelected(data.athletes[0]?.id || "");
+    if (data && !data.athletes.some((a) => a.id === selected))
+      setSelected(data.athletes[0]?.id || "");
   }, [data, selected]);
   const write = async (path: string, p?: unknown, method?: string) => {
     if (demo)
@@ -190,6 +185,39 @@ export function Hub({
       (a) =>
         a.athlete_user_id === data.profile.id && a.owner_parent_id !== null,
     );
+  if (
+    (minor &&
+      [
+        "billing",
+        "athletes",
+        "products",
+        "settings",
+        "revenue",
+        "customers",
+      ].includes(section)) ||
+    (coach &&
+      data.profile.role !== "admin" &&
+      ["products", "revenue", "settings"].includes(section))
+  )
+    return (
+      <main id="main" className="loading-page">
+        <h1>This page is unavailable for your account.</h1>
+        <p>Your coaching records are available in your workspace.</p>
+        <Link href={prefix}>Return to dashboard</Link>
+      </main>
+    );
+  if (
+    segments[1] &&
+    (!coach ||
+      section !== "athletes" ||
+      !data.athletes.some((a) => a.id === segments[1]))
+  )
+    return (
+      <main id="main" className="loading-page">
+        <h1>Athlete workspace unavailable</h1>
+        <Link href={prefix}>Return to dashboard</Link>
+      </main>
+    );
   const aid = coach && segments[1] ? segments[1] : selected;
   const athlete = data.athletes.find((a) => a.id === aid);
   const scoped = <T extends { athlete_id: string }>(rows: T[]) =>
@@ -203,8 +231,12 @@ export function Hub({
   const credits = scoped(data.credits).filter(
     (c) => !c.expires_at || new Date(c.expires_at) > new Date(),
   );
-  const plans = scoped(data.plans);
-  const reports = scoped(data.reports);
+  const plans = [...scoped(data.plans)].sort((a, b) =>
+    b.start_date.localeCompare(a.start_date),
+  );
+  const reports = [...scoped(data.reports)].sort((a, b) =>
+    b.report_period.localeCompare(a.report_period),
+  );
   const videos = scoped(data.videos);
   const subs = scoped(data.subscriptions);
   const available = credits
@@ -323,9 +355,9 @@ export function Hub({
       })),
     };
   }
-  function createReport() {
+  function createReport(report?: Report) {
     setEditor({
-      title: "Create progress report",
+      title: report ? "Edit progress report" : "Create progress report",
       fields: [
         athleteSelect(),
         text("report_period", "Report period", "date"),
@@ -343,9 +375,16 @@ export function Hub({
       initial: {
         athlete_id: aid,
         report_period: new Date().toISOString().slice(0, 10),
+        ...(report ? { ...report, publish: !!report.published_at } : {}),
       },
       submit: (p) =>
-        write("/coach/progress-reports", { ...p, publish: !!p.publish }),
+        write(
+          report
+            ? `/coach/progress-reports/${report.id}`
+            : "/coach/progress-reports",
+          { ...p, publish: !!p.publish },
+          report ? "PATCH" : "POST",
+        ),
     });
   }
   function feedback(video: Video) {
@@ -396,7 +435,27 @@ export function Hub({
       <Plus size={16} /> Book Lesson
     </Button>
   );
-  const {lessonsPanel,plansPanel,reportsPanel,videosPanel}=renderHubPanels({coach,minor,aid,data,bookButton,bookings,plans,reports,videos,athleteName,setBooking,setEditor,write,act,createPlan,createReport,feedback,athleteSelect});
+  const { lessonsPanel, plansPanel, reportsPanel, videosPanel } =
+    renderHubPanels({
+      coach,
+      minor,
+      aid,
+      data,
+      bookButton,
+      bookings,
+      plans,
+      reports,
+      videos,
+      athleteName,
+      setBooking,
+      setEditor,
+      write,
+      act,
+      createPlan,
+      createReport,
+      feedback,
+      athleteSelect,
+    });
   return (
     <div className="hub-shell">
       <aside className={`sidebar ${mobile ? "open" : ""}`}>
@@ -406,7 +465,13 @@ export function Hub({
         </div>
         <nav aria-label="Workspace navigation">
           {nav
-            .filter(([key]) => !minor || !["billing", "athletes"].includes(key))
+            .filter(
+              ([key]) =>
+                (!minor || !["billing", "athletes"].includes(key)) &&
+                (!coach ||
+                  data.profile.role === "admin" ||
+                  !["products", "revenue", "settings"].includes(key)),
+            )
             .map(([key, label, Icon]) => (
               <Link
                 key={key}
@@ -511,7 +576,12 @@ export function Hub({
                 <select
                   aria-label="ATHLETE"
                   value={selected}
-                  onChange={(e) => setSelected(e.target.value)}
+                  onChange={(e) => {
+                    setEditor(null);
+                    setBooking(null);
+                    setMessage("");
+                    setSelected(e.target.value);
+                  }}
                 >
                   {data.athletes.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -534,6 +604,7 @@ export function Hub({
           )}
           {section === "dashboard" && (
             <>
+              {coach && <CoachPriorities data={data} prefix={prefix} />}
               <div className="metric-grid">
                 <article>
                   <span>
@@ -555,7 +626,9 @@ export function Hub({
                   <strong>
                     {coach
                       ? data.athletes.length
-                      : subs.some((s) => s.status === "active")
+                      : (data.coaching_status?.some(
+                            (s) => s.athlete_id === aid && s.premium_active,
+                          ) ?? subs.some((s) => s.status === "active"))
                         ? "Premium"
                         : subs.some((s) => s.status === "past_due")
                           ? "Payment issue"
@@ -654,6 +727,20 @@ export function Hub({
                 </Panel>
               </div>
               {plansPanel}
+              {!coach && reportsPanel}
+              {!coach &&
+                credits.some(
+                  (c) =>
+                    c.remaining > 0 &&
+                    c.expires_at &&
+                    new Date(c.expires_at).getTime() <
+                      Date.now() + 14 * 86400000,
+                ) && (
+                  <p role="status" className="notice">
+                    Credits for {athlete?.first_name} expire within 14 days.
+                    Review their expiration before booking.
+                  </p>
+                )}
               {coach && (
                 <Panel title="Recent activity">
                   {data.activity?.length ? (
@@ -677,7 +764,7 @@ export function Hub({
               title={coach ? "Your athletes" : "Your family’s athletes"}
               action={
                 !coach &&
-                !minor && (
+                data.profile.role === "parent" && (
                   <Button onClick={() => addAthlete()}>
                     <Plus size={16} /> Add Athlete
                   </Button>
@@ -1047,6 +1134,7 @@ export function Hub({
       {booking && (
         <SlotPicker
           athlete_id={aid}
+          athleteName={athleteName(aid)}
           reschedule={booking.reschedule}
           close={() => setBooking(null)}
           saved={() => {
