@@ -1,3 +1,12 @@
+Render
+stripe
+vercel
+supabase
+
+
+
+
+
 # Pitch Lab Athletics
 
 A pitching-coaching platform for Coach Jacob Sosa: a public website, family Athlete Hub, coach workspace, Stripe billing, credit-based scheduling, and written coaching records. Raw pitching videos are never uploaded to this system.
